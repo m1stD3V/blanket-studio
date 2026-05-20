@@ -28,7 +28,7 @@ The builder (`builder/index.html`) is a self-contained single-page application. 
 - CSS custom properties for theming
 - WebSocket API for direct Twitch IRC integration in exported overlays
 - LocalStorage for persisting commands and quotes in the browser source
-- No external dependencies at runtime (the companion app is optional and legacy)
+- No external dependencies at runtime
 
 ### Data Flow
 

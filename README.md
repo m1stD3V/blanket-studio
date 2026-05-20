@@ -136,10 +136,6 @@ blanket-stream/
 │   ├── scene-starting-soon.html — Starting soon scene
 │   ├── scene-thanks.html   — Thanks for watching scene
 │   └── widget-nowplaying.html — Now playing widget
-├── companion/              — (Legacy) Node.js companion app
-│   ├── server.js
-│   ├── package.json
-│   └── dist/               — Pre-built binaries
 ├── package.json
 ├── README.md
 └── DOCS.md
