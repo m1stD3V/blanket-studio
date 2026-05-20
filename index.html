@@ -218,7 +218,7 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:po
 </head>
 <body>
 
-<!-- ═══ Top Bar ═══ -->
+<!-- Top Bar - app header with branding, Twitch channel linking, undo/redo, copy/paste, preview toggle, and export -->
 <header class="topbar" role="banner">
   <div class="brand">
     <svg viewBox="0 0 22 22" fill="none"><rect x="2" y="2" width="18" height="18" rx="4" fill="var(--accent)"/><path d="M7 11l3 3 5-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -256,10 +256,11 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:po
   </div>
 </header>
 
-<!-- ═══ Main ═══ -->
+<!-- Main layout - three-column design: left panel (widgets / layers / themes), center canvas (preview), right panel (properties) -->
 <main class="main">
 
-  <!-- ─── Left Panel ─── -->
+  <!-- Left Panel - sidebar with three tabs: widget library to add new widgets, layer stack to reorder, and theme presets -->
+  <aside class="panel" id="panel-left" role="complementary" aria-label="Widget library and layers">
   <aside class="panel" id="panel-left" role="complementary" aria-label="Widget library and layers">
     <div class="panel-tabs" role="tablist">
       <button class="panel-tab on" data-pt="widgets" role="tab" aria-selected="true" onclick="swPT(this,'widgets')">Widgets</button>
@@ -307,7 +308,7 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:po
     </div>
   </aside>
 
-  <!-- ─── Canvas ─── -->
+  <!-- Canvas viewport - WYSIWYG overlay preview with zoom controls, background options, snap-to-grid, and drag-and-drop support -->
   <section class="canvas" aria-label="Overlay preview canvas">
     <div class="canvas-bar">
       <span class="lbl">Canvas</span>
@@ -337,7 +338,7 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:po
     </div>
   </section>
 
-  <!-- ─── Right Panel ─── -->
+  <!-- Right Panel - property inspector with three tabs: Design (colors, typography, effects), Settings (widget-specific options), Position (x, y, w, h, rotation) -->
   <aside class="prop-panel" id="panel-right" role="complementary" aria-label="Widget properties">
     <div class="prop-empty" id="prop-empty">
       <div class="big">✨</div>
@@ -357,7 +358,7 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:po
 
 </main>
 
-<!-- ═══ Export ═══ -->
+<!-- Export dialog - generates a standalone, self-contained HTML file for use as an OBS Browser Source. Includes Twitch IRC, chat commands, and quotes. -->
 <div class="export-overlay" id="export-overlay" role="dialog" aria-label="Export overlay HTML">
   <div class="export-panel">
     <h2>Export Overlay</h2>
@@ -383,13 +384,25 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:po
   </div>
 </div>
 
-<!-- ═══ Toast ═══ -->
+<!-- Toast notification - a fixed-position container for brief status messages that fade in/out at the bottom center of the screen -->
 <div class="toast-wrap" aria-live="polite"><div class="toast" id="toast"></div></div>
 
 <script>
-// ═══════════════════════════════════════════════════════════════════════
-//  STATE
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// STATE - global variables that drive the entire application
+// ============================================================================
+// W: Master array of all widget objects on the canvas. Each entry has the shape
+//    { id: number, type: string, p: { ...default properties for that type } }
+// wid: Auto-incrementing counter for assigning unique widget IDs.
+// sel: ID of the currently selected widget (or null if none selected).
+// zoom: Current canvas zoom multiplier (0.25, 0.5, 1, or 1.5).
+// bg: Canvas stage background style ('dark', 'light', 'checkers', or 'transparent').
+// _clip: Clipboard object for copy/paste of widgets, stores { type, p }.
+// HIST: Undo/redo history stack. st[] holds serialized snapshots, idx is current
+//       position, max caps the history depth.
+// CMDS, QUOTES: User-defined Twitch chat commands and quotes.
+// _qtSeq: Auto-incrementing counter for quote IDs.
+// _twChannel, _twToken: Twitch IRC credentials for live chat integration.
 const W=[];
 let wid=0,sel=null,zoom=1,bg='dark';
 let _clip=null;
@@ -400,9 +413,12 @@ let _qtSeq=0;
 let _twChannel='';
 let _twToken='';
 
-// ═══════════════════════════════════════════════════════════════════════
-//  FONTS
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// FONTS - available typefaces for text-based widgets
+// ============================================================================
+// Loaded from Google Fonts in the <head>. Users can pick any of these from a
+// dropdown in the Design tab of the property panel. The first font (Inter) is
+// the application default.
 const FONTS=[
   'Inter','Roboto','Open Sans','Montserrat','Poppins','Lato','Nunito',
   'Raleway','Ubuntu','Playfair Display','Merriweather','Fira Code',
@@ -412,30 +428,64 @@ const FONTS=[
   'Abril Fatface','Archivo Black','Fugaz One'
 ];
 
-// ═══════════════════════════════════════════════════════════════════════
-//  WIDGET DEFAULTS
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// WIDGET DEFAULTS - factory presets for every widget type
+// ============================================================================
+// D[type] defines the initial property values (p) when a new widget of that
+// type is added. Properties use shorthand keys:
+//   ic/lb:   icon and label shown in the layer list and canvas tag
+//   x/y:     position as a percentage of canvas (0-100)
+//   w/h:     dimensions in CSS pixels (NOT percentage)
+//   op/rot:  opacity (0-100) and rotation (-180 to 180 degrees)
+//   lock:    whether movement/resize is locked
+//   accent/text/bg/font: themable appearance values
+// Widget-specific keys (alertType, metric, shape, etc.) are documented inline.
 const D={
+  // Alert Box - full-screen popup for follows/subs/bits/raids/donations.
+  //   dur: animation duration (seconds), alertType: event type, animIn/Out: entrance/exit,
+  //   boxShape: rounded|square|pill|soft, align: text alignment, msgTmpl: template with {name} {count} {message},
+  //   showIcon: toggle event icon, media/mediaType: optional BG image/video.
   alertbox:{ic:'🔔',lb:'Alert Box',x:55,y:65,w:420,h:220,op:100,rot:0,lock:false,accent:'#5a7cff',text:'#e8edf5',bg:'rgba(10,14,30,.85)',font:'Inter',dur:4,align:'right',alertType:'follow',animIn:'fade',animOut:'fade',boxShape:'rounded',media:'',mediaType:'none',msgTmpl:'{name}',showIcon:true},
+  // Chat Box - scrollable Twitch chat feed. max: max visible messages, ns/ms: name/message font sizes.
   chatbox:{ic:'💬',lb:'Chat Box',x:2,y:30,w:380,h:500,op:100,rot:0,lock:false,accent:'#5a7cff',text:'#e8edf5',bg:'rgba(10,14,30,.7)',font:'Inter',max:8,ns:15,ms:17},
+  // Stream Label - live Twitch metric display. metric: viewers|followers|subs, fmt: display template, fs: font size.
   label:{ic:'📊',lb:'Stream Label',x:50,y:45,w:400,h:60,op:100,rot:0,lock:false,accent:'#5a7cff',text:'#e8edf5',font:'Inter',metric:'viewers',fmt:'{metric} viewers',fs:28},
+  // Goal Box - progress bar toward a target. metric: followers|subs, cur/tgt: current and target values.
   goal:{ic:'🎯',lb:'Goal Box',x:50,y:80,w:420,h:90,op:100,rot:0,lock:false,accent:'#5a7cff',text:'#e8edf5',bg:'rgba(10,14,30,.7)',font:'Inter',metric:'followers',cur:150,tgt:300},
+  // Countdown - minutes:seconds countdown timer. min: starting minutes.
   countdown:{ic:'⏱️',lb:'Countdown',x:50,y:30,w:300,h:120,op:100,rot:0,lock:false,accent:'#5a7cff',text:'#e8edf5',font:'Inter',min:10},
+  // Now Playing - placeholder music-track display (Spotify/foobar2000 integration not included).
   nowplaying:{ic:'🎵',lb:'Now Playing',x:2,y:80,w:380,h:80,op:100,rot:0,lock:false,text:'#e8edf5',bg:'rgba(10,14,30,.7)',font:'Inter'},
+  // Emote Wall - grid of floating emotes with random opacity/float animation. es: emote size, max: max emotes.
   emotewall:{ic:'😊',lb:'Emote Wall',x:40,y:20,w:500,h:300,op:100,rot:0,lock:false,text:'#e8edf5',bg:'rgba(10,14,30,.5)',font:'Inter',es:48,max:20},
+  // Credits - vertical scrolling text. txt: text (one line per \\n), spd: scroll speed (pixels/frame?).
   credits:{ic:'📜',lb:'Credits',x:60,y:10,w:400,h:600,op:100,rot:0,lock:false,textC:'#e8edf5',bg:'rgba(10,14,30,.7)',font:'Inter',txt:'Thanks for watching!\nFollow me on Twitch',spd:2},
+  // BRB Scene - full-screen "be right back" overlay. label/sub: headline and subtitle text.
   brb:{ic:'🔃',lb:'BRB Scene',x:0,y:0,w:1920,h:1080,op:100,rot:0,lock:false,accent:'#5a7cff',text:'#e8edf5',font:'Inter',label:'stream',sub:'taking a short break — back soon'},
+  // Starting Soon - full-screen pre-stream countdown. label/sub: headline and subtitle, min: countdown minutes.
   'starting-soon':{ic:'▶️',lb:'Starting Soon',x:0,y:0,w:1920,h:1080,op:100,rot:0,lock:false,accent:'#5a7cff',text:'#e8edf5',font:'Inter',label:'stream',sub:'get comfy — the stream is almost ready',min:10},
+  // Thanks - full-screen end-of-stream message. label/sub: headline and subtitle.
   thanks:{ic:'🙏',lb:'Thanks',x:0,y:0,w:1920,h:1080,op:100,rot:0,lock:false,accent:'#5a7cff',text:'#e8edf5',font:'Inter',label:'stream',sub:'see you next time'},
+  // Image/GIF - static or animated image. src: URL, fit: cover|contain|fill|none, br/bdC/bdW/bgC: border/background.
   image:{ic:'🖼️',lb:'Image/GIF',x:30,y:30,w:400,h:300,op:100,rot:0,lock:false,src:'',fit:'cover',br:0,bdC:'transparent',bdW:0,bgC:'transparent'},
+  // Video - video playback widget. src: URL, loop: auto-restart.
   video:{ic:'🎬',lb:'Video',x:30,y:30,w:400,h:300,op:100,rot:0,lock:false,src:'',loop:true},
+  // Text Label - arbitrary text with full typography control. content: text, fs/align: size+alignment,
+  //   bold/ls/tt/lh: weight/letter-spacing/text-transform/line-height, txShC/B/X/Y: text shadow.
   text:{ic:'✏️',lb:'Text Label',x:30,y:30,w:400,h:80,op:100,rot:0,lock:false,textC:'#e8edf5',font:'Inter',content:'Your text here',fs:32,align:'center',bold:false,ls:0,lh:1.4,tt:'none',txShC:'rgba(0,0,0,.4)',txShB:0,txShX:0,txShY:0},
+  // Shape - vector shape (rect, circle, triangle, star, hexagon, diamond, heart).
+  //   shape: type, fill/stroke/sw: fill color/stroke color/stroke width, stDa: stroke-dasharray,
+  //   r: border-radius, gradT: gradient type (none|linear|radial), grad1/2/A: gradient colors and angle.
   shape:{ic:'🔲',lb:'Shape',x:30,y:30,w:200,h:200,op:100,rot:0,lock:false,shape:'rect',fill:'rgba(90,124,255,.2)',stroke:'#5a7cff',sw:2,stDa:'0',r:8,gradT:'none',grad1:'#5a7cff',grad2:'#ff44cc',gradA:45},
 };
 
-// ═══════════════════════════════════════════════════════════════════════
-//  THEMES
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// THEMES - preset color schemes that map to accent, text, and background
+// ============================================================================
+// Each theme has three color values. When applied via applyTheme(), every
+// widget's accent, text, bg, textC, stroke, fill, grad1/2, shC, and txShC
+// properties get bulk-updated to match. This lets the user restyle the entire
+// overlay in one click.
 const THEMES=[
   {name:'Midnight',accent:'#5a7cff',text:'#e8edf5',bg:'rgba(10,14,30,.7)'},
   {name:'Sunset',accent:'#ff6b6b',text:'#ffe8e8',bg:'rgba(40,10,20,.7)'},
@@ -447,9 +497,12 @@ const THEMES=[
   {name:'Retro',accent:'#ff8800',text:'#ffe0b0',bg:'rgba(30,15,0,.7)'},
 ];
 
-// ═══════════════════════════════════════════════════════════════════════
-//  PANEL TABS
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// PANEL TABS - switch the left sidebar and right property pane between views
+// ============================================================================
+// swPT: Switch the left panel's tab (Widgets / Layers / Themes).
+//       Hides all [data-pb] bodies, then shows the one matching `name`.
+// swPrT: Switch the right property panel's tab (Design / Settings / Position).
 function swPT(el,name){
   document.querySelectorAll('[data-pt]').forEach(t=>t.classList.remove('on'));
   el.classList.add('on');
@@ -465,9 +518,16 @@ function swPrT(el,name){
   if(pb)pb.classList.add('on');
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  HISTORY
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// HISTORY - undo/redo system
+// ============================================================================
+// saveState: Serializes the entire W array (id + type + p only) into a JSON
+//   string and pushes it onto HIST.st, trimming the future if we'd branched,
+//   then capping at HIST.max entries. Called before every mutating operation.
+// undo/redo: Move HIST.idx backward/forward and call restoreState() with the
+//   snapshot at that index.
+// restoreState: Parses the snapshot, rebuilds W, reassigns sel (best-effort to
+//   keep the same widget selected), then re-renders everything.
 function saveState(){
   const s=JSON.stringify(W.map(w=>({id:w.id,type:w.type,p:{...w.p}})));
   HIST.st.length=HIST.idx+1;
@@ -509,9 +569,20 @@ document.addEventListener('keydown',function(e){
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-//  WIDGET CRUD
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// WIDGET CRUD - create, read, update, delete operations on the W array
+// ============================================================================
+// addW: Clones the default for `type` from D, assigns a new ID, pushes onto W,
+//   selects it, saves history, and re-renders.
+// delSel: Removes the currently selected widget, selects the nearest neighbor,
+//   saves history, and re-renders.
+// pickW: Sets `sel` to the given widget ID, updates layer list visual state,
+//   rebuilds the property panel, and highlights the corresponding .ww element.
+// mvLyr: Swaps the selected widget with its neighbor (±1) in the W array,
+//   effectively moving it up/down in the z-order stack.
+// toggleLock: Toggles the `lock` flag on a widget, preventing drag/resize.
+// copyW/pasteW: Serialize the selected widget's type + p into _clip, then
+//   instantiate a copy offset by 5% to make it visibly distinct.
 function addW(type){
   const def=D[type]; if(!def)return;
   const id=++wid;
@@ -567,9 +638,15 @@ function pasteW(){
   toast('Pasted '+(D[_clip.type]?D[_clip.type].lb:_clip.type));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  LAYER LIST
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// LAYER LIST - renders the layer stack in the left sidebar and handles drag reorder
+// ============================================================================
+// rLayers: Iterates W in array order (bottom layer first), creates a .lyr-it
+//   element per widget with icon, label, lock indicator, and delete button.
+//   Supports drag-and-drop reordering via the reorder() callback.
+// reorder: Reads the visual order of .lyr-it elements from the DOM, maps their
+//   dataset.wid back to W indices, and sorts W accordingly. Called after a
+//   drag is completed.
 function rLayers(){
   const list=document.getElementById('lyr-list');
   const empty=document.getElementById('lyr-empty');
@@ -602,9 +679,20 @@ function reorder(){
   preview();
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  DOM HELPERS
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// DOM HELPERS - small utilities for building and manipulating the UI
+// ============================================================================
+// ce(tag, cls): shorthand for document.createElement with optional class.
+// esc(s): HTML-entity-encodes a string to prevent XSS in innerHTML.
+// hexify(c): Extracts a 6-char hex color from any CSS color string (rgba, hex,
+//   or 'transparent' which falls back to the dark default).
+// COLORS / colorLabel(c): Maps common hex colors to human-readable names so the
+//   UI shows "Blue (#5a7cff)" instead of just a hex code.
+// mkG(label): Creates a collapsible "group" widget (grp) with a header that
+//   toggles the body via .coll class.
+// mkFld(mkC/mkRng/mkSel/mkTgl/mkTx): Family of factory functions that build
+//   labeled form controls (color picker, range slider, select dropdown, checkbox
+//   toggle, text input) wired to call `onch` on change.
 function ce(tag,cls){const e=document.createElement(tag);if(cls)e.className=cls;return e}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function hexify(c){
@@ -702,9 +790,24 @@ function mkTx(label,val,onch,ph){
   f.appendChild(i);return f;
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  BUILD PROPERTIES
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// BUILD PROPERTIES - renders the right-side property panel for the selected widget
+// ============================================================================
+// buildProps: Determines which panel (empty state or property form) to show.
+//   Delegates to buildDesign, buildSettings, and buildPosition for the three
+//   sub-tabs (Design / Settings / Position).
+// buildDesign: Generates form controls for colors, typography (font, size,
+//   weight, transform, letter-spacing), image effects (opacity, rotation, blur,
+//   brightness, contrast, saturation, sepia, hue), border & shadow, and
+//   shape-specific properties (type, radius, gradient, stroke, dash).
+// buildSettings: Widget-specific configuration forms — alert type/animation,
+//   chat box max messages, label metric template, goal current/target, countdown
+//   duration, text content, emote wall size, image/video source, credits text,
+//   BRB/Starting Soon/Thanks label & subtitle.
+// buildPosition: Tranform group with X/Y% (relative), Width/Height (px), and
+//   rotation sliders.
+// NOTE: All controls call upd(id, key, val) on change, which mutates the widget
+//   state and triggers a re-render.
 function buildProps(){
   const root=document.getElementById('prop-root');
   const empty=document.getElementById('prop-empty');
@@ -721,7 +824,7 @@ function buildProps(){
 function buildDesign(w){
   const el=document.getElementById('pb-design'); el.innerHTML='';
   const p=w.p;
-  // ── Colors ──
+  // Colors section: accent, text, background, fill, stroke, border, shadow
   const hasCol=p.accent||p.text||p.bg||p.textC||p.fill||p.stroke||p.txShC;
   if(hasCol){
     const g=mkG('Colors');
@@ -749,7 +852,7 @@ function buildDesign(w){
     gb(g).appendChild(col);
     el.appendChild(g);
   }
-  // ── Typography ──
+  // Typography section: font family, font size, letter spacing, text transform, bold
   const hasFont=p.font||p.fs||p.ns||p.ms;
   if(hasFont){
     const g=mkG('Typography');
@@ -772,7 +875,7 @@ function buildDesign(w){
     if(p.bold!==undefined)gb(g).appendChild(mkTgl('Bold',p.bold,(v)=>upd(w.id,'bold',v)));
     el.appendChild(g);
   }
-  // ── Effects ──
+  // Effects section: opacity, rotation, and CSS filter adjustments (blur, brightness, contrast, saturation, sepia, hue)
   const hasFx=p.op!==undefined||p.rot!==undefined||p.blr!==undefined||p.bri!==undefined||p.ctr!==undefined||p.sat!==undefined||p.sep!==undefined||p.hue!==undefined;
   if(hasFx){
     const g=mkG('Effects');
@@ -786,7 +889,7 @@ function buildDesign(w){
     gb(g).appendChild(mkRng('Hue',p.hue||0,0,360,1,(v)=>upd(w.id,'hue',v)));
     el.appendChild(g);
   }
-  // ── Border & Shadow ──
+  // Border & Shadow section: border radius, border width/color, box shadow
   if(w.type==='image'||w.type==='text'||w.type==='shape'){
     const g=mkG('Border & Shadow');
     if(p.br!==undefined)gb(g).appendChild(mkRng('Radius',p.br,0,100,1,(v)=>upd(w.id,'br',v)));
@@ -800,7 +903,7 @@ function buildDesign(w){
     gb(g).appendChild(r2);
     el.appendChild(g);
   }
-  // ── Shape-specific ──
+  // Shape-specific section: shape type, gradient, stroke width, dash pattern
   if(w.type==='shape'){
     const g=mkG('Shape');
     gb(g).appendChild(mkSel('Type',[
@@ -962,9 +1065,12 @@ function buildPosition(w){
   el.querySelectorAll('.grp').forEach(g=>g.classList.add('coll'));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  UPDATE
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// UPDATE - mutates a widget property and re-renders
+// ============================================================================
+// Called by every form control in the property panel. Finds the widget by id,
+// sets p[key] = val, clamps position/size if needed, updates the layer list
+// label if the content changed, and calls preview() to reflect the change.
 function upd(id,key,val){
   const w=W.find(x=>x.id==id);
   if(!w)return;
@@ -977,9 +1083,19 @@ function upd(id,key,val){
   preview();
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  TWITCH
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// TWITCH - chat integration and test-message simulation
+// ============================================================================
+// onTwChan: Resets the connection indicator dot when the channel input changes.
+// testTw: Simulates connecting to Twitch — updates the dot to green and shows
+//   a toast. (Full IRC connection is in the exported overlay's generated JS.)
+// sendQMsg: Fires a test chat message as a random user with a random color.
+//   Routes to chatAddMsg (live canvas) and previewCmdQuote (command simulator).
+// chatAddMsg: Appends a chat bubble to every .cm element on the canvas.
+// chatAddResp: Appends a bot-response bubble to every .cm element.
+// previewCmdQuote: Simulates the exported overlay's command-parsing logic for
+//   !commands, !quote, !command add/del/edit, and custom user commands. This
+//   lets the user test their chat commands before exporting.
 function onTwChan(){
   document.getElementById('tw-dot').className='dot';
 }
@@ -1027,14 +1143,14 @@ function previewCmdQuote(username,message){
   const parts=msg.split(/\s+/);
   const cmd=parts[0];
 
-  // Built-in: !commands / !cmds
+    // Built-in: !commands / !cmds - lists all non-mod commands
   if(cmd==='!commands'||cmd==='!cmds'){
     const list=CMDS.filter(c=>!c.modOnly).map(c=>'!'+c.cmd);
     chatAddResp('!commands',list.length?'Available: '+list.join(', '):'(no commands)');
     return;
   }
 
-  // !quote / !q
+  // !quote / !q - get random quote, get by ID, count total, add (mod-only), del (mod-only)
   if(cmd==='!quote'||cmd==='!q'){
     if(parts[1]==='count'||parts[1]==='total'){
       chatAddResp('!quote','There '+(QUOTES.length===1?'is 1 quote':'are '+QUOTES.length+' quotes')+' saved.');
@@ -1070,7 +1186,7 @@ function previewCmdQuote(username,message){
     return;
   }
 
-  // !command management
+  // !command / !cmd - add, del, edit, list custom chat commands (mutations are mod-only in exported overlay)
   if(cmd==='!command'||cmd==='!cmd'){
     if(parts[1]==='add'&&parts.length>=3){
       const cName=parts[2].replace(/^!/,'');
@@ -1102,7 +1218,7 @@ function previewCmdQuote(username,message){
     return;
   }
 
-  // User commands
+  // User-defined custom commands - matches !<cmdname> against CMDS array, respects mod-only flag
   for(const c of CMDS){
     if(cmd==='!'+c.cmd.toLowerCase()){
       if(c.modOnly){chatAddResp('!'+c.cmd,'🔒 Mod-only command.');return}
@@ -1112,9 +1228,12 @@ function previewCmdQuote(username,message){
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  CANVAS
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// CANVAS - stage background and visual helpers
+// ============================================================================
+// setBg: Switches the canvas stage between dark, light, checkers, and
+//   transparent backgrounds. Updates the button active state and the viewport
+//   class list accordingly.
 function setBg(b){
   bg=b;
   document.querySelectorAll('.canvas-bar [role="group"]:last-child .btn').forEach(b=>b.classList.remove('on'));
@@ -1124,9 +1243,16 @@ function setBg(b){
   if(b==='transparent')vp.classList.add('transparent');else vp.classList.remove('transparent');
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  LAYOUT
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// LAYOUT - toggling side panels, preview mode, and arrow-key nudge
+// ============================================================================
+// togglePanel: Collapses/expands the left or right sidebar by toggling the
+//   .collapsed class and updating the toggle button state.
+// togglePreview: Enters/exits a fullscreen preview mode that hides all UI
+//   chrome (toolbar, panels, resize handles) so the user sees only the overlay.
+// Escape key: Exits preview mode.
+// Arrow keys: When a widget is selected (and not locked), arrow keys nudge its
+//   position by 1% (or 10% with Shift held).
 function togglePanel(side){
   const el=document.getElementById(side==='left'?'panel-left':'panel-right');
   el.classList.toggle('collapsed');
@@ -1155,9 +1281,18 @@ document.addEventListener('keydown',function(e){
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-//  RENDER
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// RENDER - builds CSS strings and shape clip-paths for widgets
+// ============================================================================
+// buildStyle: Produces the full inline "position:fixed;left:...;top:...;..."
+//   style string for a widget, given its properties and an optional zoom factor.
+//   Includes layout (x/y/w/h/z-index), opacity, rotation, box-shadow, CSS
+//   filters (brightness, contrast, saturate, sepia, hue-rotate, blur), border,
+//   and border-radius.
+// shapeStyle: Returns the inner CSS for a shape widget — background (solid or
+//   gradient), border/stroke, stroke-dasharray, and a clip-path for non-rect
+//   shapes (triangle, star, hexagon, diamond, heart). Circles and rounded rects
+//   use border-radius instead of clip-path.
 function buildStyle(w,z){
   z=z||1;
   const p=w.p;
@@ -1186,9 +1321,24 @@ function shapeStyle(p){
   return base+';'+rad+'background:'+grad+';'+border+dash;
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  GENERATE HTML
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// GENERATE HTML - produces the standalone, self-contained overlay file for OBS
+// ============================================================================
+// genHTML: Iterates all widgets, calls buildStyle() and renderWidget() to
+//   produce the body markup, then injects a <script> that:
+//     1. Loads CMDS and QUOTES from the editor state
+//     2. Connects to Twitch IRC via WebSocket if a channel is configured
+//     3. Handles PING/PONG, parses IRC PRIVMSG tags (display-name, color,
+//        badges, mod status)
+//     4. Implements !commands, !quote (get/count/add/del), and !command
+//        (add/del/edit/list) with mod-only restrictions
+//     5. Persists commands & quotes to localStorage so they survive refreshes
+//     6. Listens for postMessage events for in-editor testing
+//   Also injects @keyframe animations for alert widgets if any are present.
+// renderWidget: Returns the inner HTML for a single widget by type. Each type
+//   has its own template that substitutes property values. Alert boxes get
+//   conditional animations, shapes get clip-paths, images/videos get <img>/<video>
+//   tags, text widgets get font styling, etc.
 function genHTML(){
   let h='';
   const hasChat=W.some(w=>w.type==='chatbox');
@@ -1219,7 +1369,7 @@ function genHTML(){
   var twChannel=${JSON.stringify(_twChannel)};
   var twToken=${JSON.stringify(_twToken)};
 
-  // ── localStorage persistence ────────────────────────────────
+  // localStorage persistence - commands and quotes survive page refresh in the exported overlay
   var SKEY='blanket_cmds';
   try{
     var _sd=localStorage.getItem(SKEY);
@@ -1227,7 +1377,9 @@ function genHTML(){
   }catch(_){}
   function saveState(){try{localStorage.setItem(SKEY,JSON.stringify({commands:commands,quotes:quotes}))}catch(_){}}
 
-  // ── Direct Twitch IRC ────────────────────────────────────────
+  // Direct Twitch IRC - connects to Twitch chat via WebSocket (ws://irc-ws.chat.twitch.tv:443)
+  // Uses an anonymous "justinfan" nick unless a TMI token is provided.
+  // Handles PING/PONG keepalive, IRC PRIVMSG parsing, and auto-reconnect with 5s backoff.
   var irc=null;
   var ircReconnect=null;
 
@@ -1292,7 +1444,7 @@ function genHTML(){
     if(irc&&irc.readyState===1&&twToken)irc.send('PRIVMSG #'+twChannel+' :'+msg);
   }
 
-  // ── UI Helpers ────────────────────────────────────────────────
+  // UI Helpers - render chat messages, command responses, and quote displays in the overlay
 
   function addChatMsg(username,color,message,badges){
     for(var bi=0;bi<bs.length;bi++){var b=bs[bi];
@@ -1331,7 +1483,7 @@ function genHTML(){
     var parts=msg.split(/\s+/);
     var cmd=parts[0];
 
-    // Built-in: !commands - list available commands
+    // Built-in: !commands / !cmds - lists all non-mod-only commands the viewer can use
     if(cmd==='!commands'||cmd==='!cmds'){
       var list=[];
       for(var i=0;i<commands.length;i++){
@@ -1344,7 +1496,7 @@ function genHTML(){
       return;
     }
 
-    // Built-in: !command management (mod-only)
+    // Built-in: !command / !cmd - add, del, edit, and list commands (mod-only for mutations)
     if(cmd==='!command'||cmd==='!cmd'){
       if(!isMod){ircSay('Only moderators can manage commands.');return}
       var sub=parts[1];
@@ -1395,7 +1547,7 @@ function genHTML(){
       return;
     }
 
-    // Built-in: !quote - handled in checkQuotes
+    // Built-in: !quote / !q - deferred to checkQuotes() for full logic (get, add, del, random)
     if(cmd==='!quote'||cmd==='!q')return;
 
     for(var i=0;i<commands.length;i++){
@@ -1490,7 +1642,8 @@ function genHTML(){
     }
   }
 
-  // ── postMessage support for in-builder testing ───────────────
+  // postMessage support - receives test messages from the editor's sendQMsg() via window.postMessage
+  // This is how the "Send" button in the editor toolbar communicates with the overlay preview.
   window.addEventListener('message',function(e){
     if(!e.data||e.data.type!=='blanket-test-msg')return;
     addChatMsg(e.data.username,e.data.color,e.data.message,[]);
@@ -1498,7 +1651,7 @@ function genHTML(){
     checkQuotes(e.data.username,e.data.message,true);
   });
 
-  // ── Start ───────────────────────────────────────────────────
+  // Start - connect IRC, render stored quotes into the overlay
   connectIRC();
 
   function renderQuotes(){
@@ -1580,9 +1733,19 @@ function renderWidget(w){
   return '';
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  PREVIEW — renders widgets directly in the stage
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// PREVIEW - renders all widgets onto the canvas stage with drag, resize, snap
+// ============================================================================
+// WH: The 8 resize handle directions. Each maps to a formula in WH_RESIZE that
+//   computes the new {x, y, w, h} from delta mouse movement, accounting for
+//   zoom. For example, dragging the "nw" handle simultaneously adjusts x, y,
+//   w, and h; dragging "e" only changes width.
+// _int: Tracks an active drag/resize interaction { wid, handle, ox, oy, px,
+//   py, pw, ph } so onInt/endInt can compute deltas.
+// snap / SNAP_GRID / SNAP_THRESH: Grid snapping config. When enabled, widget
+//   positions snap to SNAP_GRID-pixel increments. SNAP_THRESH is the distance
+//   in pixels at which snap guides appear (aligning to other widgets' edges).
+// ctxWid: The widget ID for which the context menu was opened.
 const WH=['nw','n','ne','w','e','sw','s','se'];
 const WH_RESIZE={
   nw:(dx,dy,px,py,pw,ph,z,sz,sh)=>({x:px+dx/sz*100,y:py+dy/sh*100,w:pw-dx/z,h:ph-dy/z}),
@@ -1597,6 +1760,9 @@ const WH_RESIZE={
 let _int=null;
 let snap=true, SNAP_GRID=10, SNAP_THRESH=5, ctxWid=null;
 
+// clampToCanvas: Constrains a widget's position and size so it never goes off the
+// canvas edges. Called after every move/resize to ensure x,y stay in [0, 100-pctWidth]
+// and w,h stay at least 10px while respecting position boundaries.
 function clampToCanvas(w){
   const p=w.p;
   p.x=Math.max(0,Math.min(p.x,100-p.w/1920*100));
@@ -1606,6 +1772,14 @@ function clampToCanvas(w){
   p.x=Math.max(0,Math.min(p.x,100-p.w/1920*100));
   p.y=Math.max(0,Math.min(p.y,100-p.h/1080*100));
 }
+// snapPx: Rounds a pixel value to the nearest snap grid increment.
+// snapGridPct: Converts a percentage position to pixels, snaps, and converts back.
+// showGuide: Displays a vertical or horizontal snap alignment guide line on the canvas.
+// hideGuides: Hides both snap guides.
+// snapKeypoints: When moving a widget, checks its edges and center against every
+// other widget's edges and centers. If any are within SNAP_THRESH pixels, it
+// snaps the position and shows the guide line. This gives the user visual
+// alignment feedback.
 function snapPx(v){return snap?Math.round(v/SNAP_GRID)*SNAP_GRID:v}
 function snapGridPct(v,dim){if(!snap)return v;const sv=snapPx(v/100*dim);return sv/dim*100}
 function showGuide(dir,px){
@@ -1633,6 +1807,16 @@ function snapKeypoints(w,isMove){
   if(dy!==null){w.p.y=(y+dy)/1080*100;showGuide('h',y+dy)}
 }
 
+// preview: The main render loop. Clears the canvas stage, then iterates every
+// widget in W to build a .ww (widget wrapper) div. Each .ww is absolutely
+// positioned and sized via buildStyle(). The inner content varies by type:
+//  - image/video: <img>/<video> with object-fit
+//  - shape: a nested <div> with shapeStyle() applied
+//  - all others: renderWidget() returns the type-specific inner HTML
+// Every .ww also gets 8 resize handles (.wh-nw etc.), a move handle (.whandle),
+// a floating tag showing the widget name (.wtag), and a delete button (.wdel).
+// Clicking the stage canvas hides the context menu and deselects (in the
+// stage.onclick handler).
 function preview(){
   const stage=document.getElementById('canvas-stage');
   stage.querySelectorAll('.ww').forEach(el=>el.remove());
@@ -1677,6 +1861,9 @@ function preview(){
   setZoom(zoom);
 }
 
+// startInt: Begins a drag or resize interaction. Records the initial mouse
+// position and widget state into _int, then attaches mousemove/mouseup listeners
+// to the document so dragging works even outside the canvas.
 function startInt(e,wid,handle){
   const w=W.find(x=>x.id===wid);
   if(!w||w.p.lock)return;
@@ -1685,6 +1872,12 @@ function startInt(e,wid,handle){
   document.addEventListener('mousemove',onInt);
   document.addEventListener('mouseup',endInt);
 }
+// onInt: Called on every mousemove during a drag/resize. Computes the delta
+// from the starting point and applies it according to the handle:
+//  - 'move': translates x, y with snap-to-grid and guide alignment
+//  - 'nw','n','ne','w','e','sw','s','se': calls the corresponding WH_RESIZE
+//    formula to adjust x, y, w, h proportionally
+// Then clamps and updates the element style in-place (upOv) for smooth live feedback.
 function onInt(e){
   if(!_int)return;
   const w=W.find(x=>x.id===_int.wid);
@@ -1709,6 +1902,9 @@ function onInt(e){
   clampToCanvas(w);
   upOv(w);
 }
+// endInt: Called on mouseup to finalize the interaction. Removes the document
+// listeners, hides snap guides, then saves the undo state if the position or
+// size actually changed. Finally re-renders so everything is in sync.
 function endInt(e){
   document.removeEventListener('mousemove',onInt);
   document.removeEventListener('mouseup',endInt);
@@ -1720,6 +1916,9 @@ function endInt(e){
     preview();
   }
 }
+// upOv: Fast in-place style update for a single widget during drag/resize.
+// Avoids full re-render (preview()) for smoother animation. Only updates the
+// CSS style string of the matching .ww element.
 function upOv(w){
   const el=document.querySelector('.ww[data-wid="'+w.id+'"]');
   if(!el)return;
@@ -1745,6 +1944,9 @@ function onDrop(e){
   clampToCanvas(W[W.length-1]);sel=id;saveState();rLayers();buildProps();preview();
   toast('Dropped '+def.lb);
 }
+// setZoom: Changes the canvas zoom level. Updates the button visual, resizes the
+// stage element, and re-applies buildStyle() to every .ww element with the new
+// zoom factor (which scales pixel-based w/h but leaves percentage x/y alone).
 function setZoom(z){
   zoom=z;
   document.querySelectorAll('.canvas-bar [role="group"]:first-child .btn').forEach(b=>b.classList.remove('on'));
@@ -1759,6 +1961,9 @@ function setZoom(z){
     if(w)el.style.cssText=buildStyle(w,z).replace('position:fixed','position:absolute').replace('pointer-events:none','pointer-events:auto')+';z-index:'+(100+W.indexOf(w));
   });
 }
+// fitZoom: Calculates the largest zoom that fits the 1920x1080 canvas stage
+// inside the viewport (with 40px padding), capped at 1.5x. Used on init and
+// when side panels are toggled.
 function fitZoom(){
   const vp=document.getElementById('canvas-vp');
   const pad=40;
@@ -1767,9 +1972,15 @@ function fitZoom(){
   setZoom(Math.max(.1,Math.round(z*100)/100));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  CONTEXT MENU & SNAP TOGGLE
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// CONTEXT MENU - right-click menu on canvas widgets, plus snap toggle
+// ============================================================================
+// showCtx: Positions a fixed .ctx-menu near the mouse cursor, updates the lock
+//   button text to match the widget's state, and shows it.
+// hideCtx: Hides the context menu.
+// ctxAction: Bring to front, send to back, forward, backward, lock/unlock, copy,
+//   duplicate, or delete. Each action mutates W, saves history, and re-renders.
+// toggleSnap: Toggles the snap-to-grid flag and updates the button visual.
 function showCtx(e,wid){
   ctxWid=wid;
   const m=document.getElementById('ctx-menu');
@@ -1807,9 +2018,20 @@ function toggleSnap(){
   toast(snap?'Snap on':'Snap off');
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  CHAT TOOLS (Commands & Quotes)
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// CHAT TOOLS - modal UI for managing Twitch commands, quotes, and credentials
+// ============================================================================
+// openChatTools: Shows the chat modal, populates channel/token inputs, and
+//   re-renders the commands and quotes lists.
+// closeChatTools: Saves the channel and token values, hides the modal.
+// swChatTab: Switches between the Commands and Quotes sub-tabs.
+// rCmds / addCmd / delCmd: Render, add, and delete custom chat commands.
+//   Each command has a name, response text, cooldown in seconds, and optional
+//   mod-only flag. Stored in the CMDS array.
+// rQuotes / addQuote / delQuote / editQtTxt / editQtBy: Render, add, delete,
+//   and inline-edit quotes. Each quote has an id, text, and author.
+// exportConfig / importConfig: Serialize/deserialize CMDS, QUOTES, _twChannel,
+//   and _twToken to/from a JSON file for backup.
 function openChatTools(){
   document.getElementById('chat-modal').classList.add('on');
   document.getElementById('tw-channel').value=_twChannel||'';
@@ -1910,9 +2132,23 @@ function importConfig(){
   inp.click();
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  EXPORT
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// ============================================================================
+// EXPORT - generates overlay HTML, copies to clipboard, downloads, and project save/load
+// ============================================================================
+// exportOverlay: Opens the export dialog and populates the <textarea> with the
+//   output of genHTML() — a fully self-contained overlay HTML file (no external
+//   dependencies) suitable for use as an OBS Browser Source.
+// closeExp: Closes the export dialog overlay.
+// copyExp: Selects the generated HTML and copies it to the system clipboard.
+// dlExp: Creates a Blob from the generated HTML and triggers a download as
+//   blanket-overlay.html via a temporary <a> element.
+// exportProject: Serializes the entire editor state (widgets, commands, quotes,
+//   Twitch creds, bg, zoom, snap setting) into a JSON blob and triggers a
+//   download as blanket-project.json. This is the editable "save file" format.
+// importProject: Opens a file picker for a .json project file, deserializes it,
+//   restores widgets, commands, quotes, Twitch credentials, bg, zoom, and snap,
+//   then re-renders everything. See the "Load Project" button in the export dialog.
 function exportOverlay(){document.getElementById('export-overlay').classList.add('on');document.getElementById('export-code').value=genHTML()}
 function closeExp(){document.getElementById('export-overlay').classList.remove('on')}
 function copyExp(){const c=document.getElementById('export-code');c.select();c.setSelectionRange(0,999999);navigator.clipboard.writeText(c.value);toast('Copied to clipboard!')}
@@ -1949,9 +2185,16 @@ function importProject(){
   };inp.click();
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  THEMES
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// THEMES - renders theme selector and applies color presets to all widgets
+// ============================================================================
+// initThemes: Iterates the THEMES array and creates clickable cards in the
+//   Themes tab of the left panel. Each card shows the accent+text color swatches
+//   and the theme name.
+// applyTheme: Loops through every widget's properties and bulk-updates accent,
+//   text, bg, textC, stroke, fill, gradient endpoints, shadow, and text-shadow
+//   colors to match the selected theme. Then re-renders the property panel and
+//   canvas.
 function initThemes(){
   const el=document.getElementById('theme-list');
   for(const t of THEMES){
@@ -1980,22 +2223,32 @@ function applyTheme(t){
   buildProps();preview();toast('Applied: '+t.name);
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  TOAST & RESET
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// TOAST & RESET - notification messages and full canvas reset
+// ============================================================================
+// toast: Displays a brief message in the toast element for 2 seconds. Uses a
+//   custom _t timer property on the element itself to avoid overlapping timers.
+// resetAll: After a confirmation dialog, clears all widgets, resets the ID
+//   counter, clears the clipboard and history stack, and re-renders an empty
+//   canvas. Does NOT clear commands, quotes, or Twitch credentials.
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2000)}
 function resetAll(){if(!confirm('Clear all widgets?'))return;W.length=0;wid=0;sel=null;_clip=null;HIST.st.length=0;HIST.idx=-1;rLayers();buildProps();preview()}
 
-// ═══════════════════════════════════════════════════════════════════════
-//  INIT
-// ═══════════════════════════════════════════════════════════════════════
+// ============================================================================
+// INIT - bootstraps the application
+// ============================================================================
+// initDefaults: Seeds the initial undo state, renders an empty canvas + property
+//   panel, fits the canvas to the viewport, and wires up drag-start on widget
+//   cards so they can be dragged onto the canvas.
+// resize listener: Debounces window resize events to refit zoom after a 100ms
+//   delay.
 function initDefaults(){
   HIST.st=[];
   HIST.idx=-1;
   saveState();
   rLayers();buildProps();preview();
   setTimeout(fitZoom,50);
-  // Enable drag from widget cards
+  // Enable HTML5 drag from widget cards onto the canvas stage (onDrop handles positioning)
   document.querySelectorAll('.wg-card').forEach(el=>{
     el.addEventListener('dragstart',function(e){
       e.dataTransfer.setData('text/plain',this.dataset.type);
