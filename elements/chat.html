@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blanket · Chat</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font, 'Inter', system-ui, sans-serif);
+    background: transparent;
+    width: 400px;
+    min-height: 100vh;
+    overflow: hidden;
+    color: var(--text, #e8edf5);
+  }
+  #chat-container {
+    position: fixed;
+    top: var(--offset-top, 12px);
+    left: var(--offset-left, 12px);
+    right: var(--offset-right, 12px);
+    bottom: var(--offset-bottom, 12px);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: var(--msg-gap, 8px);
+    overflow: hidden;
+  }
+  .chat-message {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--msg-bg, rgba(10, 14, 30, 0.7));
+    border: 1px solid var(--msg-border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--msg-radius, 10px);
+    padding: var(--msg-pad, 8px 12px);
+    backdrop-filter: blur(8px);
+    animation: fadeSlideIn 0.35s ease-out forwards;
+    transform-origin: bottom left;
+  }
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .chat-message.removing {
+    animation: fadeOut 0.35s ease-in forwards;
+  }
+  @keyframes fadeOut {
+    to { opacity: 0; transform: translateY(-6px); max-height: 0; padding: 0; margin: 0; }
+  }
+  .username {
+    font-size: var(--name-size, 15px);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .message-text {
+    font-size: var(--msg-size, 17px);
+    font-weight: 400;
+    color: var(--msg-color, rgba(220, 230, 250, 0.9));
+    line-height: 1.45;
+    word-break: break-word;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 20px;
+    margin-right: 4px;
+    vertical-align: middle;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .badge-mod  { background: rgba(30,180,120,0.2); color: #6df5c2; border: 1px solid rgba(30,180,120,0.35); }
+  .badge-sub  { background: rgba(100,120,240,0.2); color: #a0afff; border: 1px solid rgba(100,120,240,0.35); }
+  .badge-vip  { background: rgba(220,100,180,0.2); color: #f5a0df; border: 1px solid rgba(220,100,180,0.35); }
+  .badge-bits { background: rgba(255,200,80,0.2);  color: #ffd97a; border: 1px solid rgba(255,200,80,0.3); }
+  .badge-broadcaster { background: rgba(255,220,80,0.18); color: #ffe87a; border: 1px solid rgba(255,220,80,0.35); }
+</style>
+</head>
+<body>
+<div id="chat-container"></div>
+<script>
+const container = document.getElementById('chat-container');
+const MAX_MESSAGES = parseInt(getComputedStyle(document.body).getPropertyValue('--max-msgs').trim()) || 6;
+const CHANNEL = document.body.getAttribute('data-channel') || 'm1std3v';
+
+const COLORS = [
+  '#7eb8ff','#80e8c0','#f4a0d0','#ffd97a',
+  '#b0a0ff','#ff9f7a','#6df5c2','#a0f0ff',
+];
+
+function colorForUser(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return COLORS[h % COLORS.length];
+}
+
+function badgeHTML(type) {
+  const map = { mod:'Mod', sub:'Sub', vip:'VIP', bits:'Bits', broadcaster:'Live' };
+  return map[type] ? `<span class="badge badge-${type}">${map[type]}</span>` : '';
+}
+
+function addMessage({ username, message, color, badges = [] }) {
+  const el = document.createElement('div');
+  el.className = 'chat-message';
+  const bHTML = badges.map(badgeHTML).join('');
+  const uColor = color || colorForUser(username);
+  el.innerHTML = `
+    <div class="username">${bHTML}<span style="color:${uColor}">${escHtml(username)}</span></div>
+    <div class="message-text">${escHtml(message)}</div>`;
+  container.appendChild(el);
+  const msgs = container.querySelectorAll('.chat-message');
+  if (msgs.length > MAX_MESSAGES) {
+    const old = msgs[0];
+    old.style.transition = 'opacity 0.3s ease, max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease';
+    old.style.opacity = '0'; old.style.maxHeight = '0'; old.style.padding = '0'; old.style.marginBottom = '0'; old.style.overflow = 'hidden';
+    setTimeout(() => old.remove(), 320);
+  }
+  container.scrollTop = container.scrollHeight;
+  setTimeout(() => {
+    if (!el.parentNode) return;
+    el.style.transition = 'opacity 0.4s ease, max-height 0.4s ease, padding 0.4s ease, margin 0.4s ease';
+    el.style.opacity = '0'; el.style.maxHeight = '0'; el.style.padding = '0'; el.style.marginBottom = '0'; el.style.overflow = 'hidden';
+    setTimeout(() => el.remove(), 420);
+  }, 30000);
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function parseIRCTags(raw) {
+  const tags = {};
+  if (!raw) return tags;
+  for (const part of raw.split(';')) {
+    const [k, v] = part.split('=');
+    tags[k] = v || '';
+  }
+  return tags;
+}
+
+function parseBadges(badgeStr) {
+  if (!badgeStr) return [];
+  return badgeStr.split(',').map(b => b.split('/')[0]);
+}
+
+function connectTwitch() {
+  const ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+  ws.onopen = () => {
+    ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
+    ws.send('NICK justinfan' + Math.floor(Math.random() * 99999));
+    ws.send('JOIN #' + CHANNEL);
+  };
+  ws.onmessage = ({ data }) => {
+    for (const line of data.split('\r\n')) {
+      if (!line) continue;
+      if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); continue; }
+      const match = line.match(/^@(\S+) :\S+ PRIVMSG #\S+ :(.+)$/);
+      if (!match) continue;
+      const tags = parseIRCTags(match[1]);
+      const message = match[2];
+      const username = tags['display-name'] || tags['login'] || 'unknown';
+      const color = tags['color'] || null;
+      const badges = parseBadges(tags['badges']);
+      addMessage({ username, message, color, badges });
+    }
+  };
+  ws.onclose = () => setTimeout(connectTwitch, 5000);
+  ws.onerror = () => {};
+}
+connectTwitch();
+</script>
+</body>
+</html>

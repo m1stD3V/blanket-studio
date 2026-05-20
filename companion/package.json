@@ -1,0 +1,20 @@
+{
+  "name": "blanket-companion",
+  "version": "1.0.0",
+  "description": "Companion app for Blanket overlays — relays Twitch chat to OBS browser sources",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "pkg server.js --output dist/blanket-companion --targets node18-win-x64,node18-linux-x64,node18-macos-x64"
+  },
+  "bin": "server.js",
+  "pkg": {
+    "assets": []
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}

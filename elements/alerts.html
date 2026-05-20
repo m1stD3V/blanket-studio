@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Blanket · Alerts</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1920px; height: 1080px;
+    overflow: hidden;
+    font-family: var(--font, 'Inter', system-ui, sans-serif);
+    background: transparent;
+  }
+  #alert-wrap {
+    position: fixed;
+    bottom: var(--offset-bottom, 60px);
+    right: var(--offset-right, 60px);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+  }
+  .alert-box {
+    position: relative;
+    min-width: var(--min-w, 340px);
+    max-width: var(--max-w, 460px);
+    background: var(--bg, rgba(10, 14, 30, 0.85));
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+    border-radius: var(--radius, 14px);
+    padding: var(--pad, 14px 18px);
+    backdrop-filter: blur(10px);
+    overflow: hidden;
+    transform: translateX(120%) scale(0.92);
+    opacity: 0;
+    transition: none;
+  }
+  .alert-box.show { animation: slideIn 0.45s cubic-bezier(0.16,1,0.3,1) forwards; }
+  .alert-box.hide { animation: slideOut 0.35s ease-in forwards; }
+  @keyframes slideIn {
+    from { transform: translateX(120%) scale(0.92); opacity: 0; }
+    to   { transform: translateX(0) scale(1); opacity: 1; }
+  }
+  @keyframes slideOut {
+    from { transform: translateX(0) scale(1); opacity: 1; }
+    to   { transform: translateX(120%) scale(0.92); opacity: 0; }
+  }
+  .alert-box::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%);
+    transform: translateX(-100%);
+    border-radius: inherit;
+    pointer-events: none;
+  }
+  .alert-box.show::before { animation: shimmer 0.8s ease 0.3s forwards; }
+  @keyframes shimmer { to { transform: translateX(200%); } }
+  .alert-bar {
+    position: absolute; left: 0; top: 12%; bottom: 12%;
+    width: 3px; border-radius: 3px;
+  }
+  .alert-content { display: flex; align-items: center; gap: 12px; }
+  .alert-icon { font-size: 24px; flex-shrink: 0; }
+  .alert-text { display: flex; flex-direction: column; gap: 2px; }
+  .alert-type {
+    font-size: 11px; font-weight: 500; letter-spacing: 4px;
+    text-transform: uppercase; opacity: 0.55;
+  }
+  .alert-name {
+    font-size: 20px; font-weight: 600;
+    color: var(--name-color, rgba(220, 235, 255, 0.95));
+    letter-spacing: 0.01em; line-height: 1.2;
+  }
+  .alert-msg {
+    font-size: 14px; font-weight: 300;
+    color: var(--msg-color, rgba(180, 205, 255, 0.7));
+    margin-top: 2px; line-height: 1.4;
+  }
+  .alert-follow .alert-bar { background: linear-gradient(to bottom, #7eb8ff, #4a80d0); }
+  .alert-follow .alert-type { color: #7eb8ff; }
+  .alert-sub    .alert-bar { background: linear-gradient(to bottom, #b0a0ff, #7060d0); }
+  .alert-sub    .alert-type { color: #b0a0ff; }
+  .alert-raid   .alert-bar { background: linear-gradient(to bottom, #f4a0d0, #c060a0); }
+  .alert-raid   .alert-type { color: #f4a0d0; }
+  .alert-bits   .alert-bar { background: linear-gradient(to bottom, #ffd97a, #d0a030); }
+  .alert-bits   .alert-type { color: #ffd97a; }
+</style>
+</head>
+<body>
+<div id="alert-wrap"></div>
+<script>
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playChime(type) {
+  const notes = {
+    follow: [523.25, 659.25, 783.99],
+    sub:    [587.33, 739.99, 880.00],
+    raid:   [659.25, 830.61, 987.77],
+    bits:   [698.46, 880.00, 1046.50],
+  };
+  const freqs = notes[type] || notes.follow;
+  freqs.forEach((freq, i) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime + i * 0.12);
+    gain.gain.setValueAtTime(0, audioCtx.currentTime + i * 0.12);
+    gain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + i * 0.12 + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i * 0.12 + 0.7);
+    osc.start(audioCtx.currentTime + i * 0.12);
+    osc.stop(audioCtx.currentTime + i * 0.12 + 0.8);
+  });
+}
+
+const CONFIG = {
+  follow: { icon: '✦', label: 'New Follower', color: '#7eb8ff', msg: (d) => `${d.name} just followed!` },
+  sub:    { icon: '★', label: 'Subscriber',   color: '#b0a0ff', msg: (d) => d.message ? `${d.name} — "${d.message}"` : `${d.name} subscribed!` },
+  raid:   { icon: '⟳', label: 'Raid',         color: '#f4a0d0', msg: (d) => `${d.name} raiding with ${d.count} viewers!` },
+  bits:   { icon: '◈', label: 'Bits',          color: '#ffd97a', msg: (d) => `${d.name} cheered ${d.amount} bits!` },
+};
+
+const queue = [];
+let busy = false;
+
+function queueAlert(type, data) {
+  queue.push({ type, data });
+  if (!busy) processQueue();
+}
+
+function processQueue() {
+  if (queue.length === 0) { busy = false; return; }
+  busy = true;
+  const { type, data } = queue.shift();
+  showAlert(type, data);
+}
+
+function showAlert(type, data) {
+  const cfg = CONFIG[type];
+  if (!cfg) { processQueue(); return; }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  playChime(type);
+
+  const wrap = document.getElementById('alert-wrap');
+  const box = document.createElement('div');
+  box.className = `alert-box alert-${type}`;
+  const msg = cfg.msg(data);
+  box.innerHTML = `
+    <div class="alert-bar"></div>
+    <div class="alert-content">
+      <div class="alert-icon" style="color:${cfg.color}">${cfg.icon}</div>
+      <div class="alert-text">
+        <div class="alert-type">${cfg.label}</div>
+        <div class="alert-name">${escHtml(data.name)}</div>
+        ${msg ? `<div class="alert-msg">${escHtml(msg)}</div>` : ''}
+      </div>
+    </div>`;
+  wrap.appendChild(box);
+  requestAnimationFrame(() => box.classList.add('show'));
+  setTimeout(() => {
+    box.classList.remove('show');
+    box.classList.add('hide');
+    box.addEventListener('animationend', () => {
+      box.remove();
+      setTimeout(processQueue, 200);
+    }, { once: true });
+  }, 4000);
+}
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+const TOKEN = document.body.getAttribute('data-token') || '';
+if (TOKEN) {
+  const script = document.createElement('script');
+  script.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+  script.onload = () => {
+    const socket = io(`https://sockets.streamlabs.com?token=${TOKEN}`, { transports: ['websocket'] });
+    socket.on('event', (data) => {
+      if (!data || !data.type || !data.message) return;
+      const msg = Array.isArray(data.message) ? data.message[0] : data.message;
+      switch (data.type) {
+        case 'follow':       queueAlert('follow', { name: msg.name }); break;
+        case 'subscription': case 'resub': queueAlert('sub', { name: msg.name, message: msg.message }); break;
+        case 'raid':         queueAlert('raid', { name: msg.name, count: msg.raiders || msg.viewerCount }); break;
+        case 'bits':         queueAlert('bits', { name: msg.name, amount: msg.amount }); break;
+      }
+    });
+  };
+  document.head.appendChild(script);
+}
+
+window.testAlert = (type) => {
+  const testData = {
+    follow: { name: 'StargazerMike' },
+    sub:    { name: 'lunarpxl', message: 'love the stream!' },
+    raid:   { name: 'NightOwlSarah', count: 42 },
+    bits:   { name: 'cosmicray_dev', amount: 100 },
+  };
+  queueAlert(type, testData[type] || { name: 'TestUser' });
+};
+</script>
+</body>
+</html>

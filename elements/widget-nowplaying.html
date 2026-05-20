@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Blanket · Now Playing</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font, 'Inter', system-ui, sans-serif);
+    background: transparent;
+    width: 400px;
+    overflow: hidden;
+    color: var(--text, #e8edf5);
+  }
+  #np {
+    display: flex;
+    align-items: center;
+    gap: var(--gap, 12px);
+    padding: var(--pad, 10px 14px);
+    background: var(--bg, rgba(10, 14, 30, 0.7));
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--radius, 10px);
+    backdrop-filter: blur(8px);
+    animation: fadeIn 0.4s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  #album-art {
+    width: var(--art-size, 48px);
+    height: var(--art-size, 48px);
+    border-radius: 6px;
+    flex-shrink: 0;
+    background: rgba(255,255,255,0.05);
+    object-fit: cover;
+  }
+  .np-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+  }
+  .np-label {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--label-color, rgba(160, 195, 255, 0.45));
+  }
+  .np-title {
+    font-size: var(--title-size, 15px);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--title-color, rgba(220, 235, 255, 0.95));
+  }
+  .np-artist {
+    font-size: var(--artist-size, 13px);
+    font-weight: 300;
+    color: var(--artist-color, rgba(160, 195, 255, 0.6));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .bar-track {
+    flex: 1;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(to right, rgba(100,150,255,0.4), rgba(160,210,255,0.9));
+    border-radius: 2px;
+    transition: width 0.5s linear;
+  }
+  .bar-time {
+    font-size: 11px;
+    font-weight: 400;
+    color: rgba(160, 195, 255, 0.4);
+    font-variant-numeric: tabular-nums;
+    min-width: 36px;
+  }
+</style>
+</head>
+<body>
+<div id="np">
+  <img id="album-art" src="" alt="">
+  <div class="np-text">
+    <div class="np-label">now playing</div>
+    <div class="np-title" id="title">—</div>
+    <div class="np-artist" id="artist">—</div>
+    <div class="bar-wrap">
+      <div class="bar-track"><div class="bar-fill" id="bar-fill"></div></div>
+      <span class="bar-time" id="bar-time">0:00</span>
+    </div>
+  </div>
+</div>
+<script>
+// Set via window.updateNowPlaying({ title, artist, albumArt, progress, duration })
+// Or use data-* attributes on <body> for static mode.
+const staticMode = document.body.hasAttribute('data-title');
+if (staticMode) {
+  document.getElementById('title').textContent = document.body.getAttribute('data-title') || '—';
+  document.getElementById('artist').textContent = document.body.getAttribute('data-artist') || '—';
+  const art = document.body.getAttribute('data-album-art');
+  if (art) document.getElementById('album-art').src = art;
+}
+
+window.updateNowPlaying = function(info) {
+  const titleEl = document.getElementById('title');
+  const artistEl = document.getElementById('artist');
+  const artEl = document.getElementById('album-art');
+  const barFill = document.getElementById('bar-fill');
+  const barTime = document.getElementById('bar-time');
+
+  if (info.title) titleEl.textContent = info.title;
+  if (info.artist) artistEl.textContent = info.artist;
+  if (info.albumArt) artEl.src = info.albumArt;
+  if (info.progress != null && info.duration) {
+    const pct = Math.min((info.progress / info.duration) * 100, 100);
+    barFill.style.width = pct + '%';
+    const m = Math.floor(info.progress / 60);
+    const s = Math.floor(info.progress % 60);
+    barTime.textContent = m + ':' + String(s).padStart(2, '0');
+  }
+};
+</script>
+</body>
+</html>
